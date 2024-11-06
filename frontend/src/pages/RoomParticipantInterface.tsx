@@ -149,7 +149,10 @@ export default function RoomParticipantInterface() {
 
   const votePoll = async (pollId: number, optionIndex: number) => {
     try {
-      await pollAPI.votePoll(pollId.toString(), optionIndex.toString());
+      await pollAPI.votePoll(pollId.toString(), {
+        optionIndex: optionIndex,
+        anonymous: isAnonymous
+      });
     } catch (error) {
       console.error("Failed to vote on poll:", error);
     }
@@ -255,9 +258,9 @@ export default function RoomParticipantInterface() {
                   <CardContent className="p-4">
                     <div className="flex items-center justify-between mb-2">
                       <div className="flex items-center space-x-2">
-                        {question.author !== "Anonymous" ? (
+                        {question.author && question.author !== "Anonymous" ? (
                           <Avatar className="w-6 h-6">
-                            <AvatarFallback>{question.author[0]}</AvatarFallback>
+                            <AvatarFallback>{getInitials(question.author)}</AvatarFallback>
                           </Avatar>
                         ) : (
                           <User className="w-6 h-6" />
