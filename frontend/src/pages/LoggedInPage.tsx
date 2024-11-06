@@ -9,7 +9,7 @@ import { Label } from "../components/ui/label"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../components/ui/tabs"
 import { ArrowRight, MessageCircle } from "lucide-react"
 import { Avatar, AvatarFallback } from "../components/ui/avatar"
-import { Switch } from "../components/ui/switch"
+// import { Switch } from "../components/ui/switch"
 import { roomAPI, userAPI } from '../services/api'
 
 interface UserProfile {
@@ -78,6 +78,12 @@ export default function Component() {
       }
 
       const response = await roomAPI.joinRoom(roomCode);
+
+      // Check if room exists and is active
+      if (!response.data) {
+        setError("Invalid room code or room has ended");
+        return;
+      }
 
       navigate("/room/participant", { 
         state: { 

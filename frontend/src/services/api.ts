@@ -50,9 +50,12 @@ export const questionAPI = {
     api.post(`/questions/${questionId}/vote`),
   updateQuestionStatus: (questionId: string, status: string) =>
     api.patch(`/questions/${questionId}/status`, { status }),
-  deleteQuestion: (questionId: string) => {
-    return axios.delete(`/api/questions/${questionId}`);
-  },
+  deleteQuestion: (questionId: string) =>
+    api.delete(`/questions/${questionId}`),
+  addAnswer: (questionId: string, data: { text: string; author: string }) =>
+    api.post(`/questions/${questionId}/answer`, data),
+  answer: (roomId: string, questionId: number, data: { text: string, author: string }) => 
+    axios.post(`/api/rooms/${roomId}/questions/${questionId}/answers`, data),
 };
 
 // Poll APIs

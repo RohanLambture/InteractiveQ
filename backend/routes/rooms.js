@@ -77,11 +77,19 @@ router.post('/join', [
   body('code').trim().isLength({ min: 6, max: 6 }).withMessage('Invalid room code')
 ], async (req, res) => {
   try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({ errors: errors.array() });
+    }
+
     const { code } = req.body;
     const room = await Room.findOne({ 
-      code, 
+      code,
       status: 'active',
-      expiresAt: { $gt: new Date() }
+      $or: [
+        { expiresAt: { $gt: new Date() } },
+        { expiresAt: null }
+      ]
     });
 
     if (!room) {
@@ -90,6 +98,7 @@ router.post('/join', [
 
     res.json(room);
   } catch (error) {
+    console.error('Join room error:', error);
     res.status(500).json({ message: 'Server error' });
   }
 });

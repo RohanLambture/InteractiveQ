@@ -174,17 +174,26 @@ export default function RoomOwnerInterface() {
     setIsAnswerDialogOpen(false)
   }
 
-  const addAnswer = () => {
+  const addAnswer = async () => {
     if (newAnswer.trim() && selectedQuestion) {
-      setQuestions(questions.map(q => 
-        q._id === selectedQuestion._id 
-          ? { ...q, answers: [...q.answers, { text: newAnswer, author: "Room Owner" }] }
-          : q
-      ))
-      setNewAnswer("")
-      closeAnswerDialog()
+      try {
+        const response = await questionAPI.addAnswer(selectedQuestion._id, {
+          text: newAnswer,
+          author: "Room Owner"
+        });
+        
+        // Update the questions array with the response data
+        setQuestions(questions.map(q => 
+          q._id === selectedQuestion._id ? response.data : q
+        ));
+        
+        setNewAnswer("");
+        closeAnswerDialog();
+      } catch (error) {
+        console.error('Error adding answer:', error);
+      }
     }
-  }
+  };
 
   const addPollOption = () => {
     setNewPollOptions([...newPollOptions, ""])

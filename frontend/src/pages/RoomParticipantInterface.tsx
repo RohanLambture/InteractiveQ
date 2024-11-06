@@ -11,7 +11,7 @@ import { Badge } from "../components/ui/badge"
 import { ScrollArea } from "../components/ui/scroll-area"
 import { MessageCircle, ThumbsUp, Send, User, Clock, AlertCircle } from "lucide-react"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "../components/ui/dialog"
-import { questionAPI, pollAPI, pollForUpdates } from '../services/api';
+import { questionAPI, pollAPI, pollForUpdates, roomAPI, userAPI } from '../services/api';
 
 interface Answer {
   text: string;
@@ -37,138 +37,64 @@ interface Poll {
 export default function RoomParticipantInterface() {
   const location = useLocation()
   const navigate = useNavigate()
-  const { isAnonymous: initialIsAnonymous, roomCode, roomName, roomDuration } = location.state || {}
 
-  const [isAnonymous, setIsAnonymous] = useState(initialIsAnonymous || false)
-  const [questions, setQuestions] = useState<Question[]>([
-    { id: 1, text: "What's the most exciting feature of this product?", votes: 5, answers: [], author: "Alice" },
-    { id: 2, text: "How does this compare to competitors?", votes: 3, answers: [], author: "Anonymous" },
-  ])
-  const [polls, setPolls] = useState<Poll[]>([
-    {
-      id: 1,
-      question: "Which feature should we prioritize next?",
-      options: ["Mobile App", "Desktop Integration", "API Access"],
-      votes: [12, 8, 15],
-      votedBy: []
-    },
-    {
-      id: 2, 
-      question: "How often do you use our product?",
-      options: ["Daily", "Weekly", "Monthly", "Rarely"],
-      votes: [25, 15, 8, 3],
-      votedBy: []
-    }
-  ])
-  const [newQuestion, setNewQuestion] = useState("")
-  const [username, setUsername] = useState("John Doe")
-  const [selectedQuestion, setSelectedQuestion] = useState<typeof questions[0] | null>(null)
-  const [newAnswer, setNewAnswer] = useState("")
-  const [timeLeft, setTimeLeft] = useState((roomDuration || 60) * 60)
+  const { 
+    roomId = '', 
+    roomCode = '', 
+    roomName = '', 
+  } = location.state || {};
+
+  const [isAnonymous, setIsAnonymous] = useState(false)
   const [isSessionEnded, setIsSessionEnded] = useState(false)
+  const [username, setUsername] = useState("Anonymous User")
+  const [newQuestion, setNewQuestion] = useState("")
+  const [questions, setQuestions] = useState<Question[]>([])
   const [isAnswerDialogOpen, setIsAnswerDialogOpen] = useState(false)
+  const [selectedQuestion, setSelectedQuestion] = useState<Question | null>(null)
+  const [newAnswer, setNewAnswer] = useState("")
+  const [polls, setPolls] = useState<Poll[]>([])
+  const [userProfile, setUserProfile] = useState<any>(null)
 
   useEffect(() => {
-    if (isAnonymous) {
-      setUsername("Anonymous User")
+    if (!roomId) {
+      console.error('No room ID provided');
+      navigate('/dashboard');
+      return;
     }
-  }, [isAnonymous])
 
-  useEffect(() => {
-    const timer = setInterval(() => {
-      setTimeLeft((prevTime) => (prevTime > 0 ? prevTime - 1 : 0))
-    }, 1000)
-    return () => clearInterval(timer)
-  }, [])
+    // Fetch user profile
+    const fetchUserProfile = async () => {
+      try {
+        const response = await userAPI.getProfile();
+        setUserProfile(response.data);
+        setUsername(response.data.fullName); // Set actual username
+      } catch (error) {
+        console.error('Error fetching user profile:', error);
+      }
+    };
 
-  useEffect(() => {
-    if (timeLeft === 0) {
-      endSession()
-    }
-  }, [timeLeft])
+    // Fetch initial room data
+    const fetchRoomData = async () => {
+      try {
+        const response = await roomAPI.getRoomDetails(roomId);
+        setQuestions(response.data.questions);
+        setPolls(response.data.polls);
+      } catch (error) {
+        console.error('Error fetching room data:', error);
+      }
+    };
 
-  useEffect(() => {
+    fetchUserProfile();
+    fetchRoomData();
+
     // Set up polling for updates
-    const cleanup = pollForUpdates(roomId, ({ questions: newQuestions, polls: newPolls }) => {
-      setQuestions(newQuestions);
-      setPolls(newPolls);
+    const cleanup = pollForUpdates(roomId, (data) => {
+      setQuestions(data.questions);
+      setPolls(data.polls);
     });
 
     return () => cleanup();
-  }, [roomId]);
-
-  const formatTime = (seconds: number) => {
-    const minutes = Math.floor(seconds / 60)
-    const remainingSeconds = seconds % 60
-    return `${minutes}:${remainingSeconds.toString().padStart(2, '0')}`
-  }
-
-  const addQuestion = async () => {
-    if (newQuestion.trim()) {
-      try {
-        await questionAPI.createQuestion({
-          content: newQuestion,
-          roomId,
-          isAnonymous,
-        });
-        setNewQuestion("");
-      } catch (error) {
-        console.error('Error creating question:', error);
-      }
-    }
-  };
-
-  const openAnswerDialog = (question: Question) => {
-    setSelectedQuestion(question)
-    setIsAnswerDialogOpen(true)
-  }
-
-  const closeAnswerDialog = () => {
-    setSelectedQuestion(null)
-    setNewAnswer("")
-    setIsAnswerDialogOpen(false)
-  }
-
-  const addAnswer = () => {
-    if (newAnswer.trim() && selectedQuestion) {
-      const updatedQuestions = questions.map((q) =>
-        q.id === selectedQuestion.id
-          ? {
-              ...q,
-              answers: [
-                ...q.answers,
-                { text: newAnswer, author: isAnonymous ? "Anonymous" : username },
-              ],
-            }
-          : q
-      )
-      setQuestions(updatedQuestions)
-      setNewAnswer("")
-      closeAnswerDialog()
-    }
-  }
-
-  const voteQuestion = (id: number) => {
-    setQuestions(
-      questions.map((q) => (q.id === id ? { ...q, votes: q.votes + 1 } : q))
-    )
-  }
-
-  const votePoll = async (pollId: string, optionIndex: number) => {
-    try {
-      await pollAPI.votePoll(pollId, {
-        optionIndex,
-        anonymous: isAnonymous,
-      });
-    } catch (error) {
-      console.error('Error voting in poll:', error);
-    }
-  };
-
-  const hasVoted = (pollId: number) => {
-    const poll = polls.find(p => p.id === pollId);
-    return poll?.votedBy.includes(username);
-  }
+  }, [roomId, navigate]);
 
   const getInitials = (name: string) => {
     return name
@@ -185,6 +111,65 @@ export default function RoomParticipantInterface() {
     }, 3000)
   }
 
+  const addQuestion = async () => {
+    if (!newQuestion.trim()) return;
+    
+    const question = {
+      content: newQuestion,
+      roomId: roomId,
+      isAnonymous: isAnonymous
+    };
+    
+    try {
+      const response = await questionAPI.createQuestion(question);
+      setQuestions(prevQuestions => [...prevQuestions, response.data]);
+      setNewQuestion("");
+    } catch (error) {
+      console.error("Failed to add question:", error);
+    }
+  };
+
+  const openAnswerDialog = (question: Question) => {
+    setSelectedQuestion(question)
+    setIsAnswerDialogOpen(true)
+  }
+
+  const voteQuestion = async (questionId: number) => {
+    try {
+      await questionAPI.voteQuestion(questionId.toString());
+    } catch (error) {
+      console.error("Failed to vote on question:", error);
+    }
+  };
+
+  const hasVoted = (pollId: number): boolean => {
+    const poll = polls.find(p => p.id === pollId);
+    return poll?.votedBy.includes(username) || false;
+  };
+
+  const votePoll = async (pollId: number, optionIndex: number) => {
+    try {
+      await pollAPI.votePoll(pollId.toString(), optionIndex.toString());
+    } catch (error) {
+      console.error("Failed to vote on poll:", error);
+    }
+  };
+
+  const addAnswer = async () => {
+    if (!newAnswer.trim() || !selectedQuestion) return;
+    
+    try {
+      await questionAPI.answer(roomId, selectedQuestion.id, {
+        text: newAnswer,
+        author: isAnonymous ? "Anonymous" : username
+      });
+      setNewAnswer("");
+      setIsAnswerDialogOpen(false);
+    } catch (error) {
+      console.error("Failed to add answer:", error);
+    }
+  };
+
   if (isSessionEnded) {
     return (
       <div className="flex items-center justify-center h-screen bg-gray-100 dark:bg-gray-900">
@@ -200,20 +185,24 @@ export default function RoomParticipantInterface() {
     )
   }
 
+  if (!roomId) {
+    return (
+      <div className="flex items-center justify-center h-screen">
+        <p>Loading...</p>
+      </div>
+    );
+  }
+
   return (
     <div className="flex flex-col min-h-screen bg-gray-100 dark:bg-gray-900">
       <header className="sticky top-0 z-10 bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700">
         <div className="container mx-auto px-4 py-4 flex items-center justify-between">
           <div className="flex items-center space-x-4">
             <MessageCircle className="w-6 h-6 text-primary" />
-            <h1 className="text-xl font-semibold">{roomName || "Default Room Name"}</h1>
-            <Badge variant="outline">{roomCode || "DEFAULT"}</Badge>
+            <h1 className="text-xl font-semibold">{roomName}</h1>
+            <Badge variant="outline">{roomCode}</Badge>
           </div>
           <div className="flex items-center space-x-4">
-            {/* <div className="flex items-center space-x-2 bg-primary/10 text-primary rounded-md px-3 py-1">
-              <Clock className="w-4 h-4" />
-              <span className="text-sm font-medium">{formatTime(timeLeft)}</span>
-            </div> */}
             <div className="flex items-center space-x-2">
               <span className="text-sm font-medium">{username}</span>
               <Avatar className="w-8 h-8">

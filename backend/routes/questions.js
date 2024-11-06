@@ -119,4 +119,32 @@ router.delete('/:questionId', auth, async (req, res) => {
   }
 });
 
+// Add answer to question
+router.post('/:questionId/answer', auth, async (req, res) => {
+  try {
+    const { text, author } = req.body;
+    const question = await Question.findById(req.params.questionId);
+    
+    if (!question) {
+      return res.status(404).json({ message: 'Question not found' });
+    }
+
+    // Check if user is room owner
+    const room = await Room.findById(question.room);
+    if (room.owner.toString() !== req.userId) {
+      return res.status(403).json({ message: 'Not authorized' });
+    }
+
+    question.answers.push({ text, author });
+    await question.save();
+    
+    // Populate author information before sending response
+    await question.populate('author', 'fullName');
+    
+    res.json(question);
+  } catch (error) {
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
 export default router; 
