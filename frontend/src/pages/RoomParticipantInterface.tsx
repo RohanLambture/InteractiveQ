@@ -11,6 +11,7 @@ import { Badge } from "../components/ui/badge"
 import { ScrollArea } from "../components/ui/scroll-area"
 import { MessageCircle, ThumbsUp, Send, User, Clock, AlertCircle } from "lucide-react"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "../components/ui/dialog"
+import { questionAPI, pollAPI, pollForUpdates } from '../services/api';
 
 interface Answer {
   text: string;
@@ -25,7 +26,15 @@ interface Question {
   author: string;
 }
 
-export default function ImprovedRoomParticipantInterface() {
+interface Poll {
+  id: number;
+  question: string;
+  options: string[];
+  votes: number[];
+  votedBy: string[]; // Track who has voted
+}
+
+export default function RoomParticipantInterface() {
   const location = useLocation()
   const navigate = useNavigate()
   const { isAnonymous: initialIsAnonymous, roomCode, roomName, roomDuration } = location.state || {}
@@ -34,6 +43,22 @@ export default function ImprovedRoomParticipantInterface() {
   const [questions, setQuestions] = useState<Question[]>([
     { id: 1, text: "What's the most exciting feature of this product?", votes: 5, answers: [], author: "Alice" },
     { id: 2, text: "How does this compare to competitors?", votes: 3, answers: [], author: "Anonymous" },
+  ])
+  const [polls, setPolls] = useState<Poll[]>([
+    {
+      id: 1,
+      question: "Which feature should we prioritize next?",
+      options: ["Mobile App", "Desktop Integration", "API Access"],
+      votes: [12, 8, 15],
+      votedBy: []
+    },
+    {
+      id: 2, 
+      question: "How often do you use our product?",
+      options: ["Daily", "Weekly", "Monthly", "Rarely"],
+      votes: [25, 15, 8, 3],
+      votedBy: []
+    }
   ])
   const [newQuestion, setNewQuestion] = useState("")
   const [username, setUsername] = useState("John Doe")
@@ -62,27 +87,36 @@ export default function ImprovedRoomParticipantInterface() {
     }
   }, [timeLeft])
 
+  useEffect(() => {
+    // Set up polling for updates
+    const cleanup = pollForUpdates(roomId, ({ questions: newQuestions, polls: newPolls }) => {
+      setQuestions(newQuestions);
+      setPolls(newPolls);
+    });
+
+    return () => cleanup();
+  }, [roomId]);
+
   const formatTime = (seconds: number) => {
     const minutes = Math.floor(seconds / 60)
     const remainingSeconds = seconds % 60
     return `${minutes}:${remainingSeconds.toString().padStart(2, '0')}`
   }
 
-  const addQuestion = () => {
+  const addQuestion = async () => {
     if (newQuestion.trim()) {
-      setQuestions([
-        ...questions,
-        {
-          id: questions.length + 1,
-          text: newQuestion,
-          votes: 0,
-          answers: [],
-          author: isAnonymous ? "Anonymous" : username,
-        },
-      ])
-      setNewQuestion("")
+      try {
+        await questionAPI.createQuestion({
+          content: newQuestion,
+          roomId,
+          isAnonymous,
+        });
+        setNewQuestion("");
+      } catch (error) {
+        console.error('Error creating question:', error);
+      }
     }
-  }
+  };
 
   const openAnswerDialog = (question: Question) => {
     setSelectedQuestion(question)
@@ -118,6 +152,22 @@ export default function ImprovedRoomParticipantInterface() {
     setQuestions(
       questions.map((q) => (q.id === id ? { ...q, votes: q.votes + 1 } : q))
     )
+  }
+
+  const votePoll = async (pollId: string, optionIndex: number) => {
+    try {
+      await pollAPI.votePoll(pollId, {
+        optionIndex,
+        anonymous: isAnonymous,
+      });
+    } catch (error) {
+      console.error('Error voting in poll:', error);
+    }
+  };
+
+  const hasVoted = (pollId: number) => {
+    const poll = polls.find(p => p.id === pollId);
+    return poll?.votedBy.includes(username);
   }
 
   const getInitials = (name: string) => {
@@ -160,12 +210,11 @@ export default function ImprovedRoomParticipantInterface() {
             <Badge variant="outline">{roomCode || "DEFAULT"}</Badge>
           </div>
           <div className="flex items-center space-x-4">
-            <div className="flex items-center space-x-2 bg-primary/10 text-primary rounded-md px-3 py-1">
+            {/* <div className="flex items-center space-x-2 bg-primary/10 text-primary rounded-md px-3 py-1">
               <Clock className="w-4 h-4" />
               <span className="text-sm font-medium">{formatTime(timeLeft)}</span>
-            </div>
+            </div> */}
             <div className="flex items-center space-x-2">
-              
               <span className="text-sm font-medium">{username}</span>
               <Avatar className="w-8 h-8">
                 <AvatarFallback>{getInitials(username)}</AvatarFallback>
@@ -205,9 +254,10 @@ export default function ImprovedRoomParticipantInterface() {
         </Card>
 
         <Tabs defaultValue="all" className="space-y-4">
-          <TabsList className="grid w-full grid-cols-2">
+          <TabsList className="grid w-full grid-cols-3">
             <TabsTrigger value="all">All Questions</TabsTrigger>
             <TabsTrigger value="my">My Questions</TabsTrigger>
+            <TabsTrigger value="polls">Polls</TabsTrigger>
           </TabsList>
           <TabsContent value="all">
             <ScrollArea className="h-[calc(100vh-400px)]">
@@ -269,6 +319,35 @@ export default function ImprovedRoomParticipantInterface() {
                     </CardContent>
                   </Card>
                 ))}
+            </ScrollArea>
+          </TabsContent>
+          <TabsContent value="polls">
+            <ScrollArea className="h-[calc(100vh-400px)]">
+              {polls.map((poll) => (
+                <Card key={poll.id} className="mb-4">
+                  <CardHeader>
+                    <CardTitle>{poll.question}</CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    {poll.options.map((option, index) => (
+                      <div key={index} className="flex justify-between items-center mb-2">
+                        <Button 
+                          variant="outline" 
+                          className="w-full text-left justify-between mb-2"
+                          onClick={() => votePoll(poll.id, index)}
+                          disabled={hasVoted(poll.id)}
+                        >
+                          <span>{option}</span>
+                          <span>{poll.votes[index]} votes</span>
+                        </Button>
+                      </div>
+                    ))}
+                    {hasVoted(poll.id) && (
+                      <p className="text-sm text-muted-foreground mt-2">You have already voted in this poll</p>
+                    )}
+                  </CardContent>
+                </Card>
+              ))}
             </ScrollArea>
           </TabsContent>
         </Tabs>

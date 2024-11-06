@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { useNavigate } from "react-router-dom"
 import { Button } from "../components/ui/button"
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "../components/ui/card"
@@ -10,43 +10,86 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "../components/ui/tabs"
 import { ArrowRight, MessageCircle } from "lucide-react"
 import { Avatar, AvatarFallback } from "../components/ui/avatar"
 import { Switch } from "../components/ui/switch"
+import { roomAPI, userAPI } from '../services/api'
+
+interface UserProfile {
+  fullName: string;
+  email: string;
+}
 
 export default function Component() {
-  const [userName, setUserName] = useState("John Doe") // Replace with actual user name from your auth system
+  const [userProfile, setUserProfile] = useState<UserProfile | null>(null)
   const [isAnonymous, setIsAnonymous] = useState(false)
   const [roomName, setRoomName] = useState("")
-  const [roomDuration, setRoomDuration] = useState("")
   const [roomCode, setRoomCode] = useState("")
-  const userInitials = userName.split(' ').map(n => n[0]).join('').toUpperCase()
+  const [error, setError] = useState("")
   const navigate = useNavigate()
 
-  const handleCreateRoom = () => {
-    if (roomName && parseInt(roomDuration) > 0) {
+  useEffect(() => {
+    const fetchUserProfile = async () => {
+      try {
+        const response = await userAPI.getProfile();
+        setUserProfile(response.data);
+      } catch (error: any) {
+        console.error('Error fetching user profile:', error);
+        // Handle unauthorized access
+        if (error.response?.status === 401) {
+          navigate('/signin');
+        }
+      }
+    };
+
+    fetchUserProfile();
+  }, [navigate]);
+
+  const userInitials = userProfile?.fullName
+    ? userProfile.fullName.split(' ').map(n => n[0]).join('').toUpperCase()
+    : '';
+
+  const handleCreateRoom = async () => {
+    try {
+      if (!roomName) {
+        setError("Please enter a room name");
+        return;
+      }
+
+      const response = await roomAPI.createRoom({ 
+        name: roomName
+      });
+
       navigate("/room/owner", { 
         state: { 
-          roomName, 
-          roomDuration: parseInt(roomDuration),
-          roomCode: generateRoomCode() // You need to implement this function
+          roomId: response.data._id,
+          roomName: response.data.name,
+          roomCode: response.data.code
         } 
-      })
-    } else {
-      alert("Please enter a valid room name and duration.")
+      });
+    } catch (error) {
+      setError("Failed to create room. Please try again.");
+      console.error('Error creating room:', error);
     }
   }
 
-  const handleJoinRoom = () => {
-    //dummy room code "123456"
-    if (roomCode === "123456") {
+  const handleJoinRoom = async () => {
+    try {
+      if (!roomCode) {
+        setError("Please enter a room code");
+        return;
+      }
+
+      const response = await roomAPI.joinRoom(roomCode);
+
       navigate("/room/participant", { 
         state: { 
+          roomId: response.data._id,
           isAnonymous,
-          roomCode,
-          roomName: "Joined Room", //  fetch the actual room name from backend
-          roomDuration: 60 //  fetch the actual duration from backend 
+          roomCode: response.data.code,
+          roomName: response.data.name
         } 
-      })
-    } else {
-      alert("Invalid room code. Please try again.")
+      });
+    } catch (error) {
+      setError("Invalid room code or room has ended");
+      console.error('Error joining room:', error);
     }
   }
 
@@ -60,7 +103,7 @@ export default function Component() {
           </a>
         </nav>
         <div className="flex items-center gap-4">
-          <span className="text-sm font-medium">{userName}</span>
+          <span className="text-sm font-medium">{userProfile?.fullName}</span>
           <Avatar>
             <AvatarFallback className="text-black">{userInitials}</AvatarFallback>
           </Avatar>
@@ -97,7 +140,10 @@ export default function Component() {
                       onChange={(e) => setRoomName(e.target.value)}
                     />
                   </div>
-                  <div className="space-y-1">
+
+                  {/* TODO: Add room duration input if needed later  */}
+
+                  {/* <div className="space-y-1">
                     <Label htmlFor="room-duration">Room Duration (minutes)</Label>
                     <Input 
                       id="room-duration" 
@@ -106,7 +152,7 @@ export default function Component() {
                       value={roomDuration}
                       onChange={(e) => setRoomDuration(e.target.value)}
                     />
-                  </div>
+                  </div> */}
                 </CardContent>
                 <CardFooter className="flex flex-col gap-4">
                   <Button className="w-full" onClick={handleCreateRoom}>
@@ -132,14 +178,14 @@ export default function Component() {
                       onChange={(e) => setRoomCode(e.target.value)}
                     />
                   </div>
-                  <div className="flex items-center space-x-2">
+                  {/* <div className="flex items-center space-x-2">
                     <Switch
                       id="anonymous-mode"
                       checked={isAnonymous}
                       onCheckedChange={setIsAnonymous}
                     />
                     <Label htmlFor="anonymous-mode">Join anonymously</Label>
-                  </div>
+                  </div> */}
                 </CardContent>
                 <CardFooter>
                   <Button className="w-full" onClick={handleJoinRoom}>
@@ -163,3 +209,4 @@ export default function Component() {
 function generateRoomCode() {
   return Math.random().toString(36).substring(2, 8).toUpperCase();
 }
+

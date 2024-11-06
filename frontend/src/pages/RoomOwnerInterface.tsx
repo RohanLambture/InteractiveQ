@@ -11,54 +11,113 @@ import { ScrollArea } from "../components/ui/scroll-area"
 import { Separator } from "../components/ui/separator"
 import { BarChart, MessageCircle, Users, PlusCircle, Send, ThumbsUp, Trash2, User, Clock, Share2 } from "lucide-react"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "../components/ui/dialog"
+import { roomAPI, questionAPI, pollAPI, pollForUpdates } from '../services/api';
 
 interface Question {
-  id: number;
-  text: string;
-  votes: number;
-  author: string;
+  _id: string;
+  content: string;
+  votes: string[];
+  author: {
+    _id: string;
+    fullName: string;
+  } | null;
+  isAnonymous: boolean;
+  status: string;
+  createdAt: string;
   answers: Array<{ text: string; author: string }>;
 }
 
 interface Poll {
-  id: number;
+  _id: string;
   question: string;
-  options: string[];
-  votes: number[];
+  options: Array<{
+    text: string;
+    votes: number;
+  }>;
+  status: string;
+  voters: Array<{
+    user: string;
+    anonymous: boolean;
+  }>;
 }
 
-export default function ImprovedRoomOwnerInterface() {
+export default function RoomOwnerInterface() {
   const location = useLocation()
-  const { roomName, roomDuration, roomCode } = location.state || {}
+  const { roomId, roomName, roomCode } = location.state || {}
   const navigate = useNavigate()
 
-  const [timeLeft, setTimeLeft] = useState((roomDuration || 60) * 60)
-  const [questions, setQuestions] = useState<Question[]>([
-    { id: 1, text: "What's the most exciting feature of this product?", votes: 5, author: "Alice", answers: [] },
-    { id: 2, text: "How does this compare to competitors?", votes: 3, author: "Anonymous", answers: [] },
-  ])
-  const [newQuestion, setNewQuestion] = useState("")
-  const [participants, setParticipants] = useState(45)
-  const [selectedQuestion, setSelectedQuestion] = useState<Question | null>(null)
-  const [newAnswer, setNewAnswer] = useState("")
-  const [isAnswerDialogOpen, setIsAnswerDialogOpen] = useState(false)
+  const [questions, setQuestions] = useState<Question[]>([])
   const [polls, setPolls] = useState<Poll[]>([])
+  const [newQuestion, setNewQuestion] = useState("")
   const [newPollQuestion, setNewPollQuestion] = useState("")
   const [newPollOptions, setNewPollOptions] = useState(["", ""])
+  const [error, setError] = useState("")
+  const [selectedQuestion, setSelectedQuestion] = useState<Question | null>(null)
+  const [isAnswerDialogOpen, setIsAnswerDialogOpen] = useState(false)
   const [isSessionEnded, setIsSessionEnded] = useState(false)
+  const [newAnswer, setNewAnswer] = useState("")
+  const [participants, setParticipants] = useState<number>(0)
 
   useEffect(() => {
-    const timer = setInterval(() => {
-      setTimeLeft((prevTime) => (prevTime > 0 ? prevTime - 1 : 0))
-    }, 1000)
-    return () => clearInterval(timer)
-  }, [])
-
-  useEffect(() => {
-    if (timeLeft === 0) {
-      endSession()
+    if (!roomId) {
+      navigate("/");
+      return;
     }
-  }, [timeLeft])
+
+    // Initial data fetch
+    const fetchData = async () => {
+      try {
+        const response = await roomAPI.getRoomDetails(roomId);
+        setQuestions(response.data.questions);
+        setPolls(response.data.polls);
+      } catch (error) {
+        console.error('Error fetching room details:', error);
+        setError("Failed to load room data");
+      }
+    };
+
+    fetchData();
+
+    // Set up polling for updates
+    const cleanup = pollForUpdates(roomId, (data) => {
+      setQuestions(data.questions);
+      setPolls(data.polls);
+    });
+
+    return () => cleanup();
+  }, [roomId]);
+
+  const handleCreatePoll = async () => {
+    try {
+      const validOptions = newPollOptions.filter(opt => opt.trim());
+      if (validOptions.length < 2) {
+        setError("At least 2 options are required");
+        return;
+      }
+
+      await pollAPI.createPoll({
+        question: newPollQuestion,
+        options: validOptions,
+        roomId
+      });
+
+      setNewPollQuestion("");
+      setNewPollOptions(["", ""]);
+    } catch (error) {
+      console.error('Error creating poll:', error);
+      setError("Failed to create poll");
+    }
+  };
+
+  const handleEndRoom = async () => {
+    try {
+      await roomAPI.endRoom(roomId);
+      navigate("/dashboard");
+    } catch (error) {
+      console.error('Error ending room:', error);
+      setError("Failed to end room");
+    }
+  };
 
   const formatTime = (seconds: number) => {
     const minutes = Math.floor(seconds / 60)
@@ -66,20 +125,43 @@ export default function ImprovedRoomOwnerInterface() {
     return `${minutes}:${remainingSeconds.toString().padStart(2, '0')}`
   }
 
-  const addQuestion = () => {
+  const addQuestion = async () => {
     if (newQuestion.trim()) {
-      setQuestions([...questions, { id: questions.length + 1, text: newQuestion, votes: 0, author: "Room Owner", answers: [] }])
-      setNewQuestion("")
+      try {
+        const response = await questionAPI.createQuestion({
+          content: newQuestion,
+          roomId,
+          isAnonymous: false,
+        });
+        // Add the new question to the existing questions
+        setQuestions(prevQuestions => [...prevQuestions, response.data]);
+        setNewQuestion("");
+      } catch (error) {
+        console.error('Error creating question:', error);
+      }
     }
-  }
+  };
 
-  const deleteQuestion = (id: number) => {
-    setQuestions(questions.filter(q => q.id !== id))
-  }
+  const deleteQuestion = async (id: string) => {
+    try {
+      await questionAPI.deleteQuestion(id);
+      setQuestions(questions.filter(q => q._id !== id));
+    } catch (error) {
+      console.error('Error deleting question:', error);
+    }
+  };
 
-  const voteQuestion = (id: number) => {
-    setQuestions(questions.map(q => q.id === id ? { ...q, votes: q.votes + 1 } : q))
-  }
+  const voteQuestion = async (id: string) => {
+    try {
+      const response = await questionAPI.voteQuestion(id);
+      // Update questions with the response from the server
+      setQuestions(questions.map(q => 
+        q._id === id ? response.data : q
+      ));
+    } catch (error) {
+      console.error('Error voting for question:', error);
+    }
+  };
 
   const openAnswerDialog = (question: Question) => {
     setSelectedQuestion(question)
@@ -95,7 +177,7 @@ export default function ImprovedRoomOwnerInterface() {
   const addAnswer = () => {
     if (newAnswer.trim() && selectedQuestion) {
       setQuestions(questions.map(q => 
-        q.id === selectedQuestion.id 
+        q._id === selectedQuestion._id 
           ? { ...q, answers: [...q.answers, { text: newAnswer, author: "Room Owner" }] }
           : q
       ))
@@ -114,26 +196,31 @@ export default function ImprovedRoomOwnerInterface() {
     setNewPollOptions(updatedOptions)
   }
 
-  const launchPoll = () => {
-    if (newPollQuestion.trim() && newPollOptions.filter(option => option.trim()).length >= 2) {
-      const newPoll: Poll = {
-        id: polls.length + 1,
-        question: newPollQuestion,
-        options: newPollOptions.filter(option => option.trim()),
-        votes: new Array(newPollOptions.filter(option => option.trim()).length).fill(0)
+  const launchPoll = async () => {
+    if (newPollQuestion.trim() && newPollOptions.filter(opt => opt.trim()).length >= 2) {
+      try {
+        await pollAPI.createPoll({
+          question: newPollQuestion,
+          options: newPollOptions.filter(opt => opt.trim()),
+          roomId,
+        });
+        setNewPollQuestion("");
+        setNewPollOptions(["", ""]);
+      } catch (error) {
+        console.error('Error creating poll:', error);
       }
-      setPolls([...polls, newPoll])
-      setNewPollQuestion("")
-      setNewPollOptions(["", ""])
     }
-  }
+  };
 
-  const endSession = () => {
-    setIsSessionEnded(true)
-    setTimeout(() => {
-      navigate("/dashboard")
-    }, 3000)
-  }
+  const endSession = async () => {
+    try {
+      await roomAPI.endRoom(roomId);
+      setIsSessionEnded(true);
+      setTimeout(() => navigate("/dashboard"), 3000);
+    } catch (error) {
+      console.error('Error ending session:', error);
+    }
+  };
 
   if (isSessionEnded) {
     return (
@@ -160,14 +247,20 @@ export default function ImprovedRoomOwnerInterface() {
             <Badge variant="outline">{roomCode || "DEFAULT"}</Badge>
           </div>
           <div className="flex items-center space-x-4">
-            <Button variant="outline" size="sm">
+
+            {/* TODO: Add participants count if needed */}
+            {/* <Button variant="outline" size="sm">
               <Users className="w-4 h-4 mr-2" />
               {participants} Participants
-            </Button>
-            <div className="flex items-center space-x-2 bg-primary/10 text-primary rounded-md px-3 py-1">
+            </Button> */}
+
+            {/* TODO: Add timer if rest is done */}
+
+
+            {/* <div className="flex items-center space-x-2 bg-primary/10 text-primary rounded-md px-3 py-1">
               <Clock className="w-4 h-4" />
               <span className="text-sm font-medium">{formatTime(timeLeft)}</span>
-            </div>
+            </div> */}
             <Button variant="destructive" size="sm" onClick={endSession}>End Session</Button>
           </div>
         </div>
@@ -177,7 +270,7 @@ export default function ImprovedRoomOwnerInterface() {
           <TabsList className="grid w-full grid-cols-3">
             <TabsTrigger value="questions">Questions</TabsTrigger>
             <TabsTrigger value="polls">Polls</TabsTrigger>
-            <TabsTrigger value="analytics">Analytics</TabsTrigger>
+            {/* <TabsTrigger value="analytics">Analytics</TabsTrigger> */}
           </TabsList>
           <TabsContent value="questions" className="space-y-4">
             <Card>
@@ -200,30 +293,32 @@ export default function ImprovedRoomOwnerInterface() {
             </Card>
             <ScrollArea className="h-[calc(100vh-300px)]">
               {questions.map((question) => (
-                <Card key={question.id} className="mb-4">
+                <Card key={question._id} className="mb-4">
                   <CardContent className="p-4">
                     <div className="flex items-center justify-between mb-2">
                       <div className="flex items-center space-x-2">
-                        {question.author !== "Anonymous" ? (
+                        {question.author ? (
                           <Avatar className="w-6 h-6">
-                            <AvatarFallback>{question.author[0]}</AvatarFallback>
+                            <AvatarFallback>{question.author.fullName[0]}</AvatarFallback>
                           </Avatar>
                         ) : (
                           <User className="w-6 h-6" />
                         )}
-                        <span className="text-sm font-medium">{question.author}</span>
+                        <span className="text-sm font-medium">
+                          {question.author ? question.author.fullName : "Anonymous"}
+                        </span>
                       </div>
                       <div className="flex items-center space-x-2">
-                        <Button variant="ghost" size="sm" onClick={() => voteQuestion(question.id)}>
+                        <Button variant="ghost" size="sm" onClick={() => voteQuestion(question._id)}>
                           <ThumbsUp className="w-4 h-4 mr-2" />
-                          {question.votes}
+                          {question.votes.length}
                         </Button>
-                        <Button variant="ghost" size="sm" onClick={() => deleteQuestion(question.id)}>
+                        <Button variant="ghost" size="sm" onClick={() => deleteQuestion(question._id)}>
                           <Trash2 className="w-4 h-4" />
                         </Button>
                       </div>
                     </div>
-                    <p className="mb-2">{question.text}</p>
+                    <p className="mb-2">{question.content}</p>
                     <Button
                       variant="outline"
                       size="sm"
@@ -231,7 +326,7 @@ export default function ImprovedRoomOwnerInterface() {
                     >
                       Answer
                     </Button>
-                    {question.answers.length > 0 && (
+                    {(question.answers?.length > 0) && (
                       <div className="mt-4 space-y-2">
                         <h4 className="font-semibold">Answers:</h4>
                         {question.answers.map((answer, index) => (
@@ -252,7 +347,7 @@ export default function ImprovedRoomOwnerInterface() {
                   <DialogTitle>Answer Question</DialogTitle>
                 </DialogHeader>
                 <div className="space-y-4">
-                  <p className="font-medium">{selectedQuestion?.text}</p>
+                  <p className="font-medium">{selectedQuestion?.content}</p>
                   <div className="flex space-x-2">
                     <Input
                       placeholder="Type your answer here..."
@@ -307,15 +402,15 @@ export default function ImprovedRoomOwnerInterface() {
               </CardContent>
             </Card>
             {polls.map((poll) => (
-              <Card key={poll.id} className="mt-4">
+              <Card key={poll._id} className="mt-4">
                 <CardHeader>
                   <CardTitle>{poll.question}</CardTitle>
                 </CardHeader>
                 <CardContent>
                   {poll.options.map((option, index) => (
                     <div key={index} className="flex justify-between items-center mb-2">
-                      <span>{option}</span>
-                      <span>{poll.votes[index]} votes</span>
+                      <span>{option.text}</span>
+                      <span>{option.votes} votes</span>
                     </div>
                   ))}
                 </CardContent>
@@ -347,7 +442,7 @@ export default function ImprovedRoomOwnerInterface() {
                     <Card>
                       <CardContent className="flex flex-col items-center justify-center p-6">
                         <ThumbsUp className="h-12 w-12 text-primary mb-2" />
-                        <p className="text-2xl font-semibold">{questions.reduce((sum, q) => sum + q.votes, 0)}</p>
+                        <p className="text-2xl font-semibold">{questions.reduce((sum, q) => sum + q.votes.length, 0)}</p>
                         <p className="text-sm text-muted-foreground">Total Votes</p>
                       </CardContent>
                     </Card>

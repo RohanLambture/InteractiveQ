@@ -1,8 +1,20 @@
 import { Button } from "../components/ui/button"
-import { MessageCircle, HelpCircle, BarChart2, Users } from "lucide-react"
-import { Link } from "react-router-dom"
+import { Link, useNavigate } from "react-router-dom"
+import { MessageCircle, BarChart2, Users, HelpCircle } from "lucide-react"
+import { isAuthenticated } from "../utils/auth"
 
 export default function LandingPage() {
+  const navigate = useNavigate()
+  const isLoggedIn = isAuthenticated()
+
+  const handleGetStarted = () => {
+    if (isLoggedIn) {
+      navigate("/dashboard")
+    } else {
+      navigate("/SignUp")
+    }
+  }
+
   return (
     <div className="flex flex-col min-h-screen bg-black text-white">
       <header className="flex items-center justify-between h-16 px-4 border-b border-gray-800 shrink-0 md:px-6">
@@ -11,12 +23,16 @@ export default function LandingPage() {
           <span className="text-lg font-semibold">InteractiveQ</span>
         </div>
         <div className="flex items-center gap-4">
-          <Link to="/SignIn">
-            <Button variant="ghost">Log in</Button>
-          </Link>
-          <Link to="/SignUp">
-            <Button>Sign up</Button>
-          </Link>   
+          {!isLoggedIn && (
+            <>
+              <Link to="/SignIn">
+                <Button variant="ghost">Log in</Button>
+              </Link>
+              <Link to="/SignUp">
+                <Button>Sign up</Button>
+              </Link>
+            </>
+          )}
         </div>
       </header>
       <main className="flex-1">
@@ -30,6 +46,12 @@ export default function LandingPage() {
                 <p className="mx-auto max-w-[700px] text-xl text-gray-400 md:text-2xl/relaxed lg:text-3xl/relaxed">
                   Create interactive Q&A sessions, live polls, and more with InteractiveQ. Perfect for meetings, events, and classrooms.
                 </p>
+                  <Button 
+                  className="mt-8 px-8 py-6 text-lg bg-white text-black hover:bg-gray-200"
+                  onClick={handleGetStarted}
+                >
+                  Get Started
+                </Button>
               </div>
             </div>
           </div>

@@ -7,22 +7,64 @@ import { MessageCircle } from "lucide-react"
 import { useState } from "react"
 
 export default function SignUp() {
-  const [name, setName] = useState("")
+  const [fullName, setFullName] = useState("")
   const [email, setEmail] = useState("")
   const [password, setPassword] = useState("")
-  const [agreeTerms, setAgreeTerms] = useState(false)
+  const [termsAccepted, setTermsAccepted] = useState(false)
+  const [error, setError] = useState("")
   const navigate = useNavigate()
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    // Dummy credentials check
-    if (name && email && password && agreeTerms) {
+    
+    try {
+      console.log('Attempting signup with:', { fullName, email, password, termsAccepted })
+      
+      const response = await fetch('http://localhost:3000/api/v1/auth/signup', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          fullName,
+          email,
+          password,
+          termsAccepted
+        }),
+      })
+
+      // Log the raw response for debugging
+      const responseText = await response.text()
+      console.log('Raw response:', responseText)
+
+      // Try to parse JSON only if it's valid
+      let data
+      try {
+        data = JSON.parse(responseText)
+      } catch (err) {
+        console.error('Failed to parse response as JSON:', responseText)
+        throw new Error('Invalid response format from server')
+      }
+
+      if (!response.ok) {
+        if (data.errors) {
+          // Handle validation errors
+          const errorMessages = data.errors.map((err: any) => err.msg).join(', ')
+          setError(errorMessages)
+        } else {
+          setError(data.message || 'Sign up failed')
+        }
+        return
+      }
+
+      // Store the token in localStorage
+      localStorage.setItem('token', data.token)
+      
       // Successful sign up
-      console.log("Sign up successful:", { name, email, password })
       navigate("/dashboard")
-    } else {
-      // Failed sign up
-      alert("Please fill in all fields and agree to the terms.")
+    } catch (err) {
+      console.error('Sign up error:', err)
+      setError('Failed to connect to server. Please try again later.')
     }
   }
 
@@ -33,19 +75,24 @@ export default function SignUp() {
           <MessageCircle className="w-16 h-16 mx-auto mb-4" />
           <h1 className="text-3xl font-bold">Create an account</h1>
         </div>
+        {error && (
+          <div className="mb-4 p-2 text-sm text-red-500 bg-red-100 rounded">
+            {error}
+          </div>
+        )}
         <form className="space-y-4" onSubmit={handleSubmit}>
           <div className="space-y-2">
-            <Label htmlFor="name" className="text-sm font-medium text-gray-300">
+            <Label htmlFor="fullName" className="text-sm font-medium text-gray-300">
               Full Name
             </Label>
             <Input
-              id="name"
+              id="fullName"
               placeholder="John Doe"
               required
               type="text"
               className="w-full px-3 py-2 bg-gray-900 border border-gray-700 rounded-md focus:outline-none focus:ring-2 focus:ring-gray-400"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
+              value={fullName}
+              onChange={(e) => setFullName(e.target.value)}
             />
           </div>
           <div className="space-y-2">
@@ -79,8 +126,9 @@ export default function SignUp() {
             <Checkbox 
               id="terms" 
               className="border-gray-600"
-              checked={agreeTerms}
-              onCheckedChange={(checked) => setAgreeTerms(checked as boolean)}
+              checked={termsAccepted}
+              onCheckedChange={(checked) => setTermsAccepted(checked as boolean)}
+              required
             />
             <Label htmlFor="terms" className="text-sm text-gray-300">
               I agree to the{" "}
