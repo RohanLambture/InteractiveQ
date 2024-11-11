@@ -115,13 +115,27 @@ router.patch('/:roomId/settings', auth, roomOwner, async (req, res) => {
   }
 });
 
-// End room
-router.patch('/:roomId/end', auth, roomOwner, async (req, res) => {
+// End a room session
+router.patch('/:roomId/end', auth, async (req, res) => {
   try {
-    req.room.status = 'ended';
-    await req.room.save();
-    res.json(req.room);
+    const room = await Room.findById(req.params.roomId);
+    
+    if (!room) {
+      return res.status(404).json({ message: 'Room not found' });
+    }
+
+    // Verify that the user is the room owner
+    if (room.owner.toString() !== req.userId) {
+      return res.status(403).json({ message: 'Only room owner can end the session' });
+    }
+
+    room.status = 'ended';
+    room.endedAt = new Date();
+    await room.save();
+
+    res.json({ message: 'Room session ended successfully', room });
   } catch (error) {
+    console.error('Error ending room session:', error);
     res.status(500).json({ message: 'Server error' });
   }
 });

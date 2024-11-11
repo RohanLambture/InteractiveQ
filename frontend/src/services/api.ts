@@ -1,4 +1,6 @@
 import axios from 'axios';
+import { removeToken } from '../utils/auth';
+import { POLLING_INTERVAL } from '../utils/constants';
 
 const API_BASE_URL = 'http://localhost:3000/api/v1';
 
@@ -17,6 +19,20 @@ api.interceptors.request.use((config) => {
   }
   return config;
 });
+
+// Add response interceptor to handle token validation errors
+api.interceptors.response.use(
+  (response) => response,
+  (error) => {
+    if (error.response?.status === 401) {
+      // Remove invalid token
+      removeToken();
+      // Redirect to signup page
+      window.location.href = '/SignUp';
+    }
+    return Promise.reject(error);
+  }
+);
 
 // Auth APIs
 export const authAPI = {
@@ -53,9 +69,7 @@ export const questionAPI = {
   deleteQuestion: (questionId: string) =>
     api.delete(`/questions/${questionId}`),
   addAnswer: (questionId: string, data: { text: string; author: string }) =>
-    api.post(`/questions/${questionId}/answer`, data),
-  answer: (roomId: string, questionId: number, data: { text: string, author: string }) => 
-    axios.post(`/api/rooms/${roomId}/questions/${questionId}/answers`, data),
+    api.post(`/questions/${questionId}/answers`, data),
 };
 
 // Poll APIs
@@ -72,14 +86,36 @@ export const pollAPI = {
 
 // Polling function for real-time updates
 export const pollForUpdates = (roomId: string, callback: (data: any) => void) => {
-  const interval = setInterval(async () => {
+  // Initial fetch immediately
+  const fetchUpdates = async () => {
     try {
       const { data } = await roomAPI.getRoomDetails(roomId);
-      callback(data);
+      const transformedData = {
+        questions: data.questions.map((q: any) => ({
+          ...q,
+          id: q._id,
+          text: q.content,
+        })),
+        polls: data.polls.map((p: any) => ({
+          ...p,
+          id: p._id,
+          options: p.options.map((opt: any) => ({
+            text: opt.text,
+            votes: opt.votes
+          }))
+        }))
+      };
+      callback(transformedData);
     } catch (error) {
       console.error('Error polling for updates:', error);
     }
-  }, 5000); // Poll every 5 seconds
+  };
+
+  // Execute initial fetch
+  fetchUpdates();
+
+  // Set up interval
+  const interval = setInterval(fetchUpdates, POLLING_INTERVAL);
 
   return () => clearInterval(interval);
 };

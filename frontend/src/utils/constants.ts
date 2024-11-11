@@ -1,0 +1,1 @@
+export const POLLING_INTERVAL = 1500; // 1.5 seconds in milliseconds 

@@ -12,6 +12,7 @@ import { Separator } from "../components/ui/separator"
 import { BarChart, MessageCircle, Users, PlusCircle, Send, ThumbsUp, Trash2, User, Clock, Share2 } from "lucide-react"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "../components/ui/dialog"
 import { roomAPI, questionAPI, pollAPI, pollForUpdates } from '../services/api';
+import { POLLING_INTERVAL } from '../utils/constants';
 
 interface Question {
   _id: string;
@@ -50,41 +51,45 @@ export default function RoomOwnerInterface() {
   const [polls, setPolls] = useState<Poll[]>([])
   const [newQuestion, setNewQuestion] = useState("")
   const [newPollQuestion, setNewPollQuestion] = useState("")
-  const [newPollOptions, setNewPollOptions] = useState(["", ""])
+  const [newPollOptions, setNewPollOptions] = useState<string[]>(["", ""]);
   const [error, setError] = useState("")
   const [selectedQuestion, setSelectedQuestion] = useState<Question | null>(null)
   const [isAnswerDialogOpen, setIsAnswerDialogOpen] = useState(false)
   const [isSessionEnded, setIsSessionEnded] = useState(false)
   const [newAnswer, setNewAnswer] = useState("")
   const [participants, setParticipants] = useState<number>(0)
+  const [isEndSessionDialogOpen, setIsEndSessionDialogOpen] = useState(false);
 
   useEffect(() => {
-    if (!roomId) {
-      navigate("/");
-      return;
-    }
+    let isComponentMounted = true;
 
-    // Initial data fetch
-    const fetchData = async () => {
+    const fetchInitialData = async () => {
       try {
         const response = await roomAPI.getRoomDetails(roomId);
-        setQuestions(response.data.questions);
-        setPolls(response.data.polls);
+        if (isComponentMounted) {
+          setQuestions(response.data.questions);
+          setPolls(response.data.polls);
+        }
       } catch (error) {
-        console.error('Error fetching room details:', error);
-        setError("Failed to load room data");
+        console.error('Error fetching room data:', error);
       }
     };
 
-    fetchData();
+    fetchInitialData();
 
     // Set up polling for updates
     const cleanup = pollForUpdates(roomId, (data) => {
-      setQuestions(data.questions);
-      setPolls(data.polls);
+      if (isComponentMounted) {
+        setQuestions(data.questions);
+        setPolls(data.polls);
+      }
     });
 
-    return () => cleanup();
+    // Cleanup function
+    return () => {
+      isComponentMounted = false;
+      cleanup();
+    };
   }, [roomId]);
 
   const handleCreatePoll = async () => {
@@ -133,8 +138,16 @@ export default function RoomOwnerInterface() {
           roomId,
           isAnonymous: false,
         });
+        
         // Add the new question to the existing questions
-        setQuestions(prevQuestions => [...prevQuestions, response.data]);
+        const questionWithAuthor = {
+          ...response.data,
+          author: {
+            _id: response.data.author,
+            fullName: "Room Owner"
+          }
+        };
+        setQuestions(prevQuestions => [...prevQuestions, questionWithAuthor]);
         setNewQuestion("");
       } catch (error) {
         console.error('Error creating question:', error);
@@ -196,50 +209,72 @@ export default function RoomOwnerInterface() {
   };
 
   const addPollOption = () => {
-    setNewPollOptions([...newPollOptions, ""])
-  }
+    setNewPollOptions(prev => [...prev, ""]);
+  };
 
   const updatePollOption = (index: number, value: string) => {
-    const updatedOptions = [...newPollOptions]
-    updatedOptions[index] = value
-    setNewPollOptions(updatedOptions)
-  }
+    setNewPollOptions(prev => {
+      const updated = [...prev];
+      updated[index] = value;
+      return updated;
+    });
+  };
 
   const launchPoll = async () => {
-    if (newPollQuestion.trim() && newPollOptions.filter(opt => opt.trim()).length >= 2) {
-      try {
-        await pollAPI.createPoll({
-          question: newPollQuestion,
-          options: newPollOptions.filter(opt => opt.trim()),
-          roomId,
-        });
-        setNewPollQuestion("");
-        setNewPollOptions(["", ""]);
-      } catch (error) {
-        console.error('Error creating poll:', error);
-      }
+    const validOptions = newPollOptions.filter(opt => opt.trim());
+    if (!newPollQuestion.trim() || validOptions.length < 2) {
+      setError("Question and at least 2 options are required");
+      return;
+    }
+
+    try {
+      await pollAPI.createPoll({
+        question: newPollQuestion,
+        options: validOptions,
+        roomId,
+      });
+      setNewPollQuestion("");
+      setNewPollOptions(["", ""]);
+    } catch (error) {
+      console.error('Error creating poll:', error);
+      setError("Failed to create poll");
     }
   };
 
-  const endSession = async () => {
+  const handleEndSession = async () => {
     try {
       await roomAPI.endRoom(roomId);
       setIsSessionEnded(true);
-      setTimeout(() => navigate("/dashboard"), 3000);
+      setTimeout(() => {
+        navigate("/dashboard");
+      }, 3000);
     } catch (error) {
       console.error('Error ending session:', error);
+      setError("Failed to end session");
     }
+  };
+
+  const getInitials = (name: string | undefined | null): string => {
+    if (!name) return '?';
+    return name
+      .split(' ')
+      .map(word => word[0] || '')
+      .join('')
+      .toUpperCase() || '?';
   };
 
   if (isSessionEnded) {
     return (
-      <div className="flex items-center justify-center h-screen bg-gray-100 dark:bg-gray-900">
+      <div className="fixed inset-0 bg-black/50 flex items-center justify-center">
         <Card className="w-96">
           <CardHeader>
             <CardTitle>Session Ended</CardTitle>
           </CardHeader>
           <CardContent>
-            <p>The session has ended....</p>
+            <p>The session has been ended successfully.</p>
+            <p className="text-sm text-muted-foreground mt-2">
+              Redirecting to dashboard...
+            </p>
           </CardContent>
         </Card>
       </div>
@@ -270,7 +305,7 @@ export default function RoomOwnerInterface() {
               <Clock className="w-4 h-4" />
               <span className="text-sm font-medium">{formatTime(timeLeft)}</span>
             </div> */}
-            <Button variant="destructive" size="sm" onClick={endSession}>End Session</Button>
+            <Button variant="destructive" size="sm" onClick={() => setIsEndSessionDialogOpen(true)}>End Session</Button>
           </div>
         </div>
       </header>
@@ -308,19 +343,19 @@ export default function RoomOwnerInterface() {
                       <div className="flex items-center space-x-2">
                         {question.author ? (
                           <Avatar className="w-6 h-6">
-                            <AvatarFallback>{question.author.fullName[0]}</AvatarFallback>
+                            <AvatarFallback>{getInitials(question.author.fullName)}</AvatarFallback>
                           </Avatar>
                         ) : (
                           <User className="w-6 h-6" />
                         )}
                         <span className="text-sm font-medium">
-                          {question.author ? question.author.fullName : "Anonymous"}
+                          {question.isAnonymous ? 'Anonymous' : question.author?.fullName || 'Unknown'}
                         </span>
                       </div>
                       <div className="flex items-center space-x-2">
                         <Button variant="ghost" size="sm" onClick={() => voteQuestion(question._id)}>
                           <ThumbsUp className="w-4 h-4 mr-2" />
-                          {question.votes.length}
+                          {question.votes?.length || 0}
                         </Button>
                         <Button variant="ghost" size="sm" onClick={() => deleteQuestion(question._id)}>
                           <Trash2 className="w-4 h-4" />
@@ -392,9 +427,9 @@ export default function RoomOwnerInterface() {
                     <Label>Options</Label>
                     {newPollOptions.map((option, index) => (
                       <Input
-                        key={index}
+                        key={`poll-option-${index}`}
                         placeholder={`Option ${index + 1}`}
-                        value={option}
+                        value={option || ''}
                         onChange={(e) => updatePollOption(index, e.target.value)}
                       />
                     ))}
@@ -475,6 +510,37 @@ export default function RoomOwnerInterface() {
           </Button>
         </div>
       </footer>
+
+      <Dialog open={isEndSessionDialogOpen} onOpenChange={setIsEndSessionDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>End Session</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <p>Are you sure you want to end this session? This action cannot be undone.</p>
+            <p className="text-sm text-muted-foreground">
+              All participants will be disconnected and the room will be closed.
+            </p>
+            <div className="flex justify-end space-x-2">
+              <Button
+                variant="outline"
+                onClick={() => setIsEndSessionDialogOpen(false)}
+              >
+                Cancel
+              </Button>
+              <Button
+                variant="destructive"
+                onClick={() => {
+                  handleEndSession();
+                  setIsEndSessionDialogOpen(false);
+                }}
+              >
+                End Session
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

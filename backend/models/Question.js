@@ -28,10 +28,6 @@ const questionSchema = new mongoose.Schema({
     enum: ['pending', 'approved', 'rejected', 'answered'],
     default: 'pending'
   },
-  createdAt: {
-    type: Date,
-    default: Date.now
-  },
   answers: [{
     text: {
       type: String,
@@ -40,8 +36,16 @@ const questionSchema = new mongoose.Schema({
     author: {
       type: String,
       required: true
+    },
+    createdAt: {
+      type: Date,
+      default: Date.now
     }
-  }]
+  }],
+  createdAt: {
+    type: Date,
+    default: Date.now
+  }
 });
 
 export default mongoose.model('Question', questionSchema); 

@@ -53,41 +53,34 @@ router.post('/', auth, [
   }
 });
 
-// Vote in a poll
-router.post('/:pollId/vote', [
-  body('optionIndex').isInt({ min: 0 }).withMessage('Invalid option'),
-  body('anonymous').isBoolean()
-], async (req, res) => {
+// Vote on a poll
+router.post('/:pollId/vote', auth, async (req, res) => {
   try {
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) {
-      return res.status(400).json({ errors: errors.array() });
-    }
-
-    const { optionIndex, anonymous } = req.body;
     const poll = await Poll.findById(req.params.pollId);
-
-    if (!poll || poll.status !== 'active') {
-      return res.status(404).json({ message: 'Poll not found or inactive' });
-    }
-
-    if (optionIndex >= poll.options.length) {
-      return res.status(400).json({ message: 'Invalid option index' });
+    if (!poll) {
+      return res.status(404).json({ message: 'Poll not found' });
     }
 
     // Check if user has already voted
-    const existingVote = poll.voters.find(v => 
-      v.user && v.user.toString() === req.userId
+    const hasVoted = poll.voters.some(voter => 
+      voter.user.toString() === req.userId
     );
 
-    if (existingVote) {
-      return res.status(400).json({ message: 'Already voted' });
+    if (hasVoted) {
+      return res.status(400).json({ message: 'Already voted in this poll' });
+    }
+
+    const { optionIndex, anonymous } = req.body;
+    
+    // Validate option index
+    if (optionIndex < 0 || optionIndex >= poll.options.length) {
+      return res.status(400).json({ message: 'Invalid option index' });
     }
 
     // Add vote
     poll.options[optionIndex].votes += 1;
     poll.voters.push({
-      user: req.userId || null,
+      user: req.userId,
       anonymous
     });
 

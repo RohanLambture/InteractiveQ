@@ -19,7 +19,7 @@ router.get('/room/:roomId', async (req, res) => {
 });
 
 // Create a question
-router.post('/', [
+router.post('/', auth, [
   body('content').trim().notEmpty().withMessage('Question content is required'),
   body('roomId').notEmpty().withMessage('Room ID is required'),
   body('isAnonymous').isBoolean()
@@ -40,13 +40,14 @@ router.post('/', [
     const question = new Question({
       room: roomId,
       content,
-      author: req.userId || null,
+      author: isAnonymous ? null : req.userId,
       isAnonymous,
-      status: room.settings.requireModeration ? 'pending' : 'approved',
-      answers: []
+      status: room.settings.requireModeration ? 'pending' : 'approved'
     });
 
     await question.save();
+    await question.populate('author', 'fullName');
+    
     res.status(201).json(question);
   } catch (error) {
     res.status(500).json({ message: 'Server error' });
@@ -119,30 +120,26 @@ router.delete('/:questionId', auth, async (req, res) => {
   }
 });
 
-// Add answer to question
-router.post('/:questionId/answer', auth, async (req, res) => {
+// Add answer to a question
+router.post('/:questionId/answers', auth, async (req, res) => {
   try {
-    const { text, author } = req.body;
     const question = await Question.findById(req.params.questionId);
-    
     if (!question) {
       return res.status(404).json({ message: 'Question not found' });
     }
 
-    // Check if user is room owner
-    const room = await Room.findById(question.room);
-    if (room.owner.toString() !== req.userId) {
-      return res.status(403).json({ message: 'Not authorized' });
-    }
+    const { text, author } = req.body;
+    
+    question.answers.push({
+      text,
+      author,
+      createdAt: new Date()
+    });
 
-    question.answers.push({ text, author });
     await question.save();
-    
-    // Populate author information before sending response
-    await question.populate('author', 'fullName');
-    
     res.json(question);
   } catch (error) {
+    console.error('Error adding answer:', error);
     res.status(500).json({ message: 'Server error' });
   }
 });

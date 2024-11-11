@@ -12,6 +12,7 @@ import { ScrollArea } from "../components/ui/scroll-area"
 import { MessageCircle, ThumbsUp, Send, User, Clock, AlertCircle } from "lucide-react"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "../components/ui/dialog"
 import { questionAPI, pollAPI, pollForUpdates, roomAPI, userAPI } from '../services/api';
+import { POLLING_INTERVAL } from '../utils/constants';
 
 interface Answer {
   text: string;
@@ -19,19 +20,29 @@ interface Answer {
 }
 
 interface Question {
-  id: number;
-  text: string;
-  votes: number;
-  answers: Answer[];
-  author: string;
+  _id: string;
+  content: string;
+  votes: string[];
+  author: {
+    _id: string;
+    fullName: string;
+  } | null;
+  isAnonymous: boolean;
+  answers: Array<{ text: string; author: string }>;
 }
 
 interface Poll {
-  id: number;
+  _id: string;
   question: string;
-  options: string[];
-  votes: number[];
-  votedBy: string[]; // Track who has voted
+  options: Array<{
+    text: string;
+    votes: number;
+  }>;
+  voters: Array<{
+    user: string;
+    anonymous: boolean;
+  }>;
+  status: string;
 }
 
 export default function RoomParticipantInterface() {
@@ -62,12 +73,16 @@ export default function RoomParticipantInterface() {
       return;
     }
 
+    let isComponentMounted = true;
+
     // Fetch user profile
     const fetchUserProfile = async () => {
       try {
         const response = await userAPI.getProfile();
-        setUserProfile(response.data);
-        setUsername(response.data.fullName); // Set actual username
+        if (isComponentMounted) {
+          setUserProfile(response.data);
+          setUsername(response.data.fullName);
+        }
       } catch (error) {
         console.error('Error fetching user profile:', error);
       }
@@ -77,8 +92,18 @@ export default function RoomParticipantInterface() {
     const fetchRoomData = async () => {
       try {
         const response = await roomAPI.getRoomDetails(roomId);
-        setQuestions(response.data.questions);
-        setPolls(response.data.polls);
+        if (isComponentMounted) {
+          const transformedQuestions = response.data.questions.map(q => ({
+            ...q,
+            votes: q.votes || [],
+            answers: q.answers || [],
+            author: q.author || null,
+            isAnonymous: q.isAnonymous || false,
+            status: q.status || 'pending'
+          }));
+          setQuestions(transformedQuestions);
+          setPolls(response.data.polls);
+        }
       } catch (error) {
         console.error('Error fetching room data:', error);
       }
@@ -89,20 +114,35 @@ export default function RoomParticipantInterface() {
 
     // Set up polling for updates
     const cleanup = pollForUpdates(roomId, (data) => {
-      setQuestions(data.questions);
-      setPolls(data.polls);
+      if (isComponentMounted) {
+        const transformedQuestions = data.questions.map(q => ({
+          ...q,
+          votes: q.votes || [],
+          answers: q.answers || [],
+          author: q.author || null,
+          isAnonymous: q.isAnonymous || false,
+          status: q.status || 'pending'
+        }));
+        setQuestions(transformedQuestions);
+        setPolls(data.polls);
+      }
     });
 
-    return () => cleanup();
+    // Cleanup function
+    return () => {
+      isComponentMounted = false;
+      cleanup();
+    };
   }, [roomId, navigate]);
 
-  const getInitials = (name: string) => {
+  const getInitials = (name: string | undefined | null): string => {
+    if (!name) return '?';
     return name
       .split(' ')
-      .map(word => word[0])
+      .map(word => word[0] || '')
       .join('')
-      .toUpperCase();
-  }
+      .toUpperCase() || '?';
+  };
 
   const endSession = () => {
     setIsSessionEnded(true)
@@ -134,27 +174,37 @@ export default function RoomParticipantInterface() {
     setIsAnswerDialogOpen(true)
   }
 
-  const voteQuestion = async (questionId: number) => {
+  const voteQuestion = async (questionId: string) => {
     try {
-      await questionAPI.voteQuestion(questionId.toString());
+      await questionAPI.voteQuestion(questionId);
     } catch (error) {
       console.error("Failed to vote on question:", error);
     }
   };
 
-  const hasVoted = (pollId: number): boolean => {
-    const poll = polls.find(p => p.id === pollId);
-    return poll?.votedBy.includes(username) || false;
+  const hasVoted = (pollId: string): boolean => {
+    const poll = polls.find(p => p._id === pollId);
+    return poll?.voters.some(voter => voter.user === userProfile?._id) || false;
   };
 
-  const votePoll = async (pollId: number, optionIndex: number) => {
+  const votePoll = async (pollId: string, optionIndex: number) => {
+    if (hasVoted(pollId)) {
+      return; // Prevent voting if already voted
+    }
+
     try {
-      await pollAPI.votePoll(pollId.toString(), {
-        optionIndex: optionIndex,
+      await pollAPI.votePoll(pollId, {
+        optionIndex,
         anonymous: isAnonymous
       });
+      
+      // Refresh the polls data
+      const response = await roomAPI.getRoomDetails(roomId);
+      if (response.data.polls) {
+        setPolls(response.data.polls);
+      }
     } catch (error) {
-      console.error("Failed to vote on poll:", error);
+      console.error('Error voting in poll:', error);
     }
   };
 
@@ -162,10 +212,18 @@ export default function RoomParticipantInterface() {
     if (!newAnswer.trim() || !selectedQuestion) return;
     
     try {
-      await questionAPI.answer(roomId, selectedQuestion.id, {
+      const response = await questionAPI.addAnswer(selectedQuestion._id, {
         text: newAnswer,
         author: isAnonymous ? "Anonymous" : username
       });
+      
+      // Update the questions array with the new answer
+      setQuestions(prevQuestions => 
+        prevQuestions.map(q => 
+          q._id === selectedQuestion._id ? response.data : q
+        )
+      );
+      
       setNewAnswer("");
       setIsAnswerDialogOpen(false);
     } catch (error) {
@@ -207,9 +265,9 @@ export default function RoomParticipantInterface() {
           </div>
           <div className="flex items-center space-x-4">
             <div className="flex items-center space-x-2">
-              <span className="text-sm font-medium">{username}</span>
+              <span className="text-sm font-medium">{username || 'Anonymous'}</span>
               <Avatar className="w-8 h-8">
-                <AvatarFallback>{getInitials(username)}</AvatarFallback>
+                <AvatarFallback>{username ? getInitials(username) : '?'}</AvatarFallback>
               </Avatar>
             </div>
           </div>
@@ -254,25 +312,30 @@ export default function RoomParticipantInterface() {
           <TabsContent value="all">
             <ScrollArea className="h-[calc(100vh-400px)]">
               {questions.map((question) => (
-                <Card key={question.id} className="mb-4">
+                <Card key={question._id} className="mb-4">
                   <CardContent className="p-4">
                     <div className="flex items-center justify-between mb-2">
                       <div className="flex items-center space-x-2">
-                        {question.author && question.author !== "Anonymous" ? (
-                          <Avatar className="w-6 h-6">
-                            <AvatarFallback>{getInitials(question.author)}</AvatarFallback>
-                          </Avatar>
+                        {!question.isAnonymous && question.author?.fullName ? (
+                          <>
+                            <Avatar className="w-6 h-6">
+                              <AvatarFallback>{getInitials(question.author.fullName)}</AvatarFallback>
+                            </Avatar>
+                            <span className="text-sm font-medium">{question.author.fullName}</span>
+                          </>
                         ) : (
-                          <User className="w-6 h-6" />
+                          <>
+                            <User className="w-6 h-6" />
+                            <span className="text-sm font-medium">Anonymous</span>
+                          </>
                         )}
-                        <span className="text-sm font-medium">{question.author}</span>
                       </div>
-                      <Button variant="ghost" size="sm" onClick={() => voteQuestion(question.id)}>
+                      <Button variant="ghost" size="sm" onClick={() => voteQuestion(question._id)}>
                         <ThumbsUp className="w-4 h-4 mr-2" />
-                        {question.votes}
+                        {question.votes.length}
                       </Button>
                     </div>
-                    <p className="mb-2">{question.text}</p>
+                    <p className="mb-2">{question.content}</p>
                     <Button
                       variant="outline"
                       size="sm"
@@ -280,11 +343,11 @@ export default function RoomParticipantInterface() {
                     >
                       Answer
                     </Button>
-                    {question.answers.length > 0 && (
+                    {question.answers && question.answers.length > 0 && (
                       <div className="mt-4 space-y-2">
                         <h4 className="font-semibold">Answers:</h4>
                         {question.answers.map((answer, index) => (
-                          <div key={index} className="pl-4 border-l-2 border-primary/30">
+                          <div key={`${question._id}-answer-${index}`} className="pl-4 border-l-2 border-primary/30">
                             <p className="text-sm">{answer.text}</p>
                             <p className="text-xs text-muted-foreground">- {answer.author}</p>
                           </div>
@@ -299,13 +362,13 @@ export default function RoomParticipantInterface() {
           <TabsContent value="my">
             <ScrollArea className="h-[calc(100vh-400px)]">
               {questions
-                .filter((q) => q.author === username)
+                .filter((q) => q.author?.fullName === username)
                 .map((question) => (
-                  <Card key={question.id} className="mb-4">
+                  <Card key={question._id} className="mb-4">
                     <CardContent className="p-4">
-                      <p className="mb-2">{question.text}</p>
+                      <p className="mb-2">{question.content}</p>
                       <div className="flex items-center justify-between">
-                        <span className="text-sm text-muted-foreground">{question.votes} votes</span>
+                        <span className="text-sm text-muted-foreground">{question.votes.length} votes</span>
                         <span className="text-sm text-muted-foreground">{question.answers.length} answers</span>
                       </div>
                     </CardContent>
@@ -316,25 +379,25 @@ export default function RoomParticipantInterface() {
           <TabsContent value="polls">
             <ScrollArea className="h-[calc(100vh-400px)]">
               {polls.map((poll) => (
-                <Card key={poll.id} className="mb-4">
+                <Card key={poll._id} className="mb-4">
                   <CardHeader>
                     <CardTitle>{poll.question}</CardTitle>
                   </CardHeader>
                   <CardContent>
                     {poll.options.map((option, index) => (
-                      <div key={index} className="flex justify-between items-center mb-2">
+                      <div key={`${poll._id}-option-${index}`} className="flex justify-between items-center mb-2">
                         <Button 
                           variant="outline" 
                           className="w-full text-left justify-between mb-2"
-                          onClick={() => votePoll(poll.id, index)}
-                          disabled={hasVoted(poll.id)}
+                          onClick={() => votePoll(poll._id, index)}
+                          disabled={hasVoted(poll._id)}
                         >
-                          <span>{option}</span>
-                          <span>{poll.votes[index]} votes</span>
+                          <span>{option.text}</span>
+                          <span>{option.votes} votes</span>
                         </Button>
                       </div>
                     ))}
-                    {hasVoted(poll.id) && (
+                    {hasVoted(poll._id) && (
                       <p className="text-sm text-muted-foreground mt-2">You have already voted in this poll</p>
                     )}
                   </CardContent>
@@ -350,7 +413,7 @@ export default function RoomParticipantInterface() {
               <DialogTitle>Answer Question</DialogTitle>
             </DialogHeader>
             <div className="space-y-4">
-              <p className="font-medium">{selectedQuestion?.text}</p>
+              <p className="font-medium">{selectedQuestion?.content}</p>
               <div className="flex space-x-2">
                 <Input
                   placeholder="Type your answer here..."
