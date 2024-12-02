@@ -40,7 +40,7 @@ InteractiveQ is a real-time Q&A and polling platform that enables interactive se
 
 1. Clone the repository
     ```bash
-    git clone https://github.com/yourusername/interactiveq.git
+    git clone https://github.com/RohanLambture/InteractiveQ.git
     cd interactiveq
     ```
 
@@ -53,7 +53,7 @@ InteractiveQ is a real-time Q&A and polling platform that enables interactive se
 3. Create a `.env` file in the backend directory
     ```plaintext
     PORT=3000
-    MONGODB_URI=mongodb://localhost:27017/interactiveq
+    MONGODB_URI=your_mongodb_uri
     JWT_SECRET=your_jwt_secret_key
     ```
 
